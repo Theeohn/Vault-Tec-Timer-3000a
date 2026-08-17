@@ -37,6 +37,7 @@
 
     h.setColor(3).setFontMonofonto36().setFontAlign(0, 0).drawString(title, 240, 40);
 
+    h.setColor(1).setFontMonofonto16().setFontAlign(0, 1).drawString("A product of Vault 919", 375, 80);
 
   }
 
