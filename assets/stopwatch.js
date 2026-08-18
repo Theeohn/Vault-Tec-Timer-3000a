@@ -7,20 +7,20 @@
 
 (function (goTo) {
   const C = {
-    FIELD_X: [140, 240, 340],
-    FIELD_Y: 160, // time display vertically centered in the 320px-tall display
-    FIELD_LABELS: ['H', 'M', 'S'],
-    SIDE_W: 50, // half-width of the MENU/RESET side buttons
-    MENU_CX: 90, // 30px left of the stack's left edge (170), minus its own half-width
-    RESET_CX: 390, // 30px right of the stack's right edge (310), plus its own half-width
+    FIELD_X: [152, 240, 328],
+    FIELD_Y: 160,
+    FIELD_LABELS: ['h', 'm', 's'],
+    SIDE_W: 50,
+    MENU_CX: 90,
+    RESET_CX: 390,
     SIDE_Y1: 220,
     SIDE_Y2: 244,
     START_Y1: 205,
     START_Y2: 229,
     LAP_Y1: 235,
     LAP_Y2: 259,
-    LAPCOUNT_Y: 282, // "LAP X OF Y" - 8px below LAP button's bottom edge
-    LAPVIEW_Y: 302, // "<  00:00:00  >" - bottom edge lands 10px above the display's bottom (320)
+    LAPCOUNT_Y: 282,
+    LAPVIEW_Y: 302,
   };
 
   let running = false;
@@ -28,7 +28,7 @@
   let laps = [];
   let lapView = 0;
   let row = 0; // 0 = start/stop, 1 = lap, 2 = lap list (only if laps exist)
-  let focus = 'stack'; // 'stack' | 'menu' | 'reset'
+  let focus = 'stack';
   let ticker, redrawInterval;
 
   function pad(n) {
@@ -61,6 +61,18 @@
       .drawString(label, cx, (y1 + y2) / 2);
   }
 
+  const NUM_FONT_SIZE = 36, LETTER_FONT_SIZE = 28;
+  const LETTER_Y_OFFSET = (NUM_FONT_SIZE - LETTER_FONT_SIZE) / 2;
+
+  function drawField(x, y, numStr, letterStr) {
+    const numW = h.setFontMonofonto36().stringWidth(numStr);
+    const letterW = h.setFontMonofonto28().stringWidth(letterStr);
+    const startX = x - (numW + letterW) / 2;
+    h.setColor(3).setFontMonofonto36().setFontAlign(-1, 0).drawString(numStr, startX, y);
+    h.setColor(3).setFontMonofonto28().setFontAlign(-1, 0)
+      .drawString(letterStr, startX + numW, y + LETTER_Y_OFFSET);
+  }
+
   function draw() {  "ram";
     h.clear(1);
     h.setColor(3).setFontMonofonto36().setFontAlign(0, 0).drawString('STOPWATCH', 240, 47);
@@ -70,11 +82,10 @@
     const secs = elapsed % 60;
     const vals = [hrs, mins, secs];
     for (let i = 0; i < 3; i++) {
-      h.setColor(3).setFontMonofonto36().setFontAlign(0, 0)
-        .drawString(pad(vals[i]) + C.FIELD_LABELS[i], C.FIELD_X[i], C.FIELD_Y - 25);
+      drawField(C.FIELD_X[i], C.FIELD_Y - 25, pad(vals[i]), C.FIELD_LABELS[i]);
     }
 
-    // Main vertical stack: START, LAP
+    // Main vertical stack: START/STOP, LAP
     drawButton(240, C.START_Y1, C.START_Y2, 70, running ? 'STOP' : 'START', focus === 'stack' && row === 0, true);
     drawButton(240, C.LAP_Y1, C.LAP_Y2, 70, 'LAP', focus === 'stack' && row === 1, running);
 
@@ -113,7 +124,6 @@
     draw();
   }
 
-  // knob1 press — activates whatever currently has focus
   function onPress() {
     if (focus === 'menu') {
       leaveForMenu();
@@ -145,11 +155,6 @@
     }
   }
 
-  // knob1 rotate — moves the row cursor among the usable stack rows,
-  // skipping any rows that are currently disabled (e.g. LAP while not
-  // running). If no enabled row exists further in that direction, the
-  // cursor simply doesn't move - it never lands on a disabled row.
-  // Has no effect while a side button has focus.
   function onKnob1(dir) {
     if (dir) {
       if (focus !== 'stack') return;
@@ -171,12 +176,6 @@
     }
   }
 
-  // knob2 rotate — pages through recorded laps while viewing the lap list;
-  // otherwise jumps focus to MENU (left) or RESET (right). Both are
-  // reachable from either middle button (START/STOP or LAP). RESET only
-  // requires there being time on the clock (elapsed > 0) - it stays
-  // reachable after stopping so the clock can still be cleared. Rotating
-  // back the opposite way returns focus to whatever stack row it left from.
   function onKnob2(dir) {
     if (focus === 'menu') {
       if (dir > 0) {
