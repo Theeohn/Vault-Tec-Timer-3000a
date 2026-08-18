@@ -8,69 +8,98 @@
 (function (goTo) {
   const C = {
     MODES: { SET: 0, RUNNING: 1, PAUSED: 2, DONE: 3 },
-    ALERT_TYPES: ['SOUND ONLY', 'LIGHTS ONLY', 'LIGHTS AND SOUND'],
-    FIELD_X: [140, 240, 340],
-    FIELD_LABELS: ['H', 'M', 'S'],
+    ALERT_TYPES: [
+      '<  ALERT TYPE: SOUND ONLY  >',
+      '<  ALERT TYPE: LED FLASH  >',
+      '<  ALERT TYPE: SOUND AND LED  >',
+    ],
+    FIELD_X: [152, 240, 328], // same coordinates as stopwatch.js's time fields
+    FIELD_Y: 160,
+    FIELD_LABELS: ['h', 'm', 's'], // lowercase, matching stopwatch.js
+    FIELD_BOX_HALF: 20, // field highlight box half-height
+    START_Y1: 205, // same coordinates as stopwatch.js's START button
+    START_Y2: 229,
+    ALERT_Y1: 235, // same coordinates as stopwatch.js's LAP button - directly below START
+    ALERT_Y2: 259,
+    MENU_CX: 90, // same coordinates as stopwatch.js's MENU button
+    SIDE_W: 50,
   };
 
   let mode = C.MODES.SET;
   let time = [0, 0, 0]; // hours, minutes, seconds
   let alertIndex = 0;
-  let row = 0; // SET: 0 = time fields, 1 = alert type, 2 = start, 3 = menu
-  let fieldIndex = 0;
+  // Unified position for knob1 in SET mode: 0=hour, 1=minute, 2=second,
+  // 3=START, 4=ALERT. Replaces the old separate row/fieldIndex pair - the
+  // three time fields are now individually reachable stops in the same
+  // list as the two buttons below them.
+  let pos = 0;
   let editing = false;
+  let focus = 'stack'; // 'stack' | 'menu' - SET mode only, mirrors stopwatch.js
   let secondsRemaining = 0;
   let ticker, alarmTicker, flashFrame = 0, redrawInterval;
   let runRow = 0; // RUNNING: 0 = cancel, 1 = menu | PAUSED: 0 = resume, 1 = cancel, 2 = menu
+  let alertW; // computed once at load - half-width of the ALERT button
 
   function pad(n) {
     return n < 10 ? '0' + n : '' + n;
   }
 
-  function drawSet() {
-    h.setColor(3).setFontMonofonto23().setFontAlign(0, 0).drawString('TIMER', 240, 50);
+  function layoutAlertButton() {
+    let maxW = 0;
+    for (let i = 0; i < C.ALERT_TYPES.length; i++) {
+      const w = h.setFontMonofonto18().stringWidth(C.ALERT_TYPES[i]);
+      if (w > maxW) maxW = w;
+    }
+    alertW = maxW / 2 + 16;
+  }
 
-    h.setColor(2).setFontMonofonto16().setFontAlign(0, 0)
-      .drawString('SET TIME  (KNOB1/KNOB2)', 240, 108);
+  function drawButton(cx, y1, y2, w, label, focused, enabled) {
+    h.setColor(2).drawRect(cx - w, y1, cx + w, y2);
+    if (enabled && focused) {
+      h.setColor(3);
+      for (let o = 1; o <= 3; o++) h.drawRect(cx - w - o, y1 - o, cx + w + o, y2 + o);
+    }
+    h.setColor(enabled ? 3 : 2).setFontMonofonto18().setFontAlign(0, 0)
+      .drawString(label, cx, (y1 + y2) / 2);
+  }
+
+  // Draws a time field as two pieces sharing a baseline: the number in
+  // Monofonto36 followed immediately by its lowercase unit letter in the
+  // smaller Monofonto28, the pair centered together on x. Matches
+  // stopwatch.js's drawField exactly.
+  const NUM_FONT_SIZE = 36, LETTER_FONT_SIZE = 28;
+  const LETTER_Y_OFFSET = (NUM_FONT_SIZE - LETTER_FONT_SIZE) / 2;
+
+  function drawField(x, y, numStr, letterStr) {
+    const numW = h.setFontMonofonto36().stringWidth(numStr);
+    const letterW = h.setFontMonofonto28().stringWidth(letterStr);
+    const startX = x - (numW + letterW) / 2;
+    h.setColor(3).setFontMonofonto36().setFontAlign(-1, 0).drawString(numStr, startX, y);
+    h.setColor(3).setFontMonofonto28().setFontAlign(-1, 0)
+      .drawString(letterStr, startX + numW, y + LETTER_Y_OFFSET);
+  }
+
+  function drawSet() {
+    h.setColor(3).setFontMonofonto36().setFontAlign(0, 0).drawString('TIMER', 240, 47);
 
     for (let i = 0; i < 3; i++) {
-      if (row === 0 && i === fieldIndex) {
+      if (focus === 'stack' && pos === i) {
+        const by = C.FIELD_Y - 25;
         if (editing) {
-          Pip.shadeBox(C.FIELD_X[i] - 45, 128, C.FIELD_X[i] + 45, 168);
+          Pip.shadeBox(C.FIELD_X[i] - 45, by - C.FIELD_BOX_HALF, C.FIELD_X[i] + 45, by + C.FIELD_BOX_HALF);
         } else {
           h.setColor(3);
           for (let o = 0; o < 3; o++) {
-            h.drawRect(C.FIELD_X[i] - 45 - o, 128 - o, C.FIELD_X[i] + 45 + o, 168 + o);
+            h.drawRect(C.FIELD_X[i] - 45 - o, by - C.FIELD_BOX_HALF - o, C.FIELD_X[i] + 45 + o, by + C.FIELD_BOX_HALF + o);
           }
         }
       }
-      h.setColor(3).setFontMonofonto36().setFontAlign(0, 0)
-        .drawString(pad(time[i]) + C.FIELD_LABELS[i], C.FIELD_X[i], 150);
+      drawField(C.FIELD_X[i], C.FIELD_Y - 25, pad(time[i]), C.FIELD_LABELS[i]);
     }
 
-    h.setColor(2).setFontMonofonto16().setFontAlign(0, 0)
-      .drawString('ALERT TYPE  (KNOB 2)', 240, 220);
-    Pip.shadeBox(80, 233, 400, 263);
-    if (row === 1) {
-      h.setColor(3);
-      for (let o = 0; o < 2; o++) h.drawRect(80 - o, 233 - o, 400 + o, 263 + o);
-    }
-    h.setColor(3).setFontMonofonto18().setFontAlign(0, 0)
-      .drawString(C.ALERT_TYPES[alertIndex], 240, 248);
-
-    h.setColor(2).drawRect(150, 273, 270, 297);
-    if (row === 2) {
-      h.setColor(3);
-      for (let o = 1; o <= 3; o++) h.drawRect(150 - o, 273 - o, 270 + o, 297 + o);
-    }
-    h.setColor(3).setFontMonofonto18().setFontAlign(0, 0).drawString('START', 210, 285);
-
-    h.setColor(2).drawRect(290, 273, 400, 297);
-    if (row === 3) {
-      h.setColor(3);
-      for (let o = 1; o <= 3; o++) h.drawRect(290 - o, 273 - o, 400 + o, 297 + o);
-    }
-    h.setColor(3).setFontMonofonto18().setFontAlign(0, 0).drawString('MENU', 345, 285);
+    drawButton(240, C.START_Y1, C.START_Y2, 70, 'START', focus === 'stack' && pos === 3, true);
+    drawButton(240, C.ALERT_Y1, C.ALERT_Y2, alertW, C.ALERT_TYPES[alertIndex], focus === 'stack' && pos === 4, true);
+    drawButton(C.MENU_CX, C.START_Y1, C.START_Y2, C.SIDE_W, 'MENU', focus === 'menu', true);
   }
 
   function drawRunning() {
@@ -214,19 +243,23 @@
     goTo('HOLO/VAULT_TEC_TIMER/TITLE.JS');
   }
 
-  // knob1 press — behavior depends on mode/row
+  // knob1 press — behavior depends on mode/pos/focus
   function onPress() {
     if (mode === C.MODES.SET) {
-      if (row === 0) {
+      if (focus === 'menu') {
+        Pip.playSound('TAB');
+        goTo('HOLO/VAULT_TEC_TIMER/TITLE.JS');
+        return;
+      }
+      if (pos <= 2) {
         editing = !editing;
         Pip.playSound('TAB');
         draw();
-      } else if (row === 2) {
+      } else if (pos === 3) {
         startTimer();
-      } else if (row === 3) {
-        Pip.playSound('TAB');
-        goTo('HOLO/VAULT_TEC_TIMER/TITLE.JS');
       }
+      // pos === 4 (ALERT): no separate press action - cycled directly via
+      // rotation, same as before.
     } else if (mode === C.MODES.RUNNING) {
       if (runRow === 0) {
         stopTicker();
@@ -254,12 +287,22 @@
     }
   }
 
-  // knob1 rotate — moves the row cursor depending on mode
+  // knob1 rotate — in SET mode: adjusts the locked field's value while
+  // editing; otherwise moves through the unified stop list (hour, minute,
+  // second, START, ALERT). Has no effect while MENU has focus. RUNNING and
+  // PAUSED modes keep their existing runRow navigation.
   function onKnob1(dir) {
     if (dir) {
       if (mode === C.MODES.SET) {
-        if (editing) return;
-        row = E.clip(row + dir, 0, 3);
+        if (focus !== 'stack') return;
+        if (editing) {
+          const max = pos === 0 ? 99 : 59;
+          time[pos] = E.clip(time[pos] + dir, 0, max);
+          Pip.playSound('SCROLL');
+          draw();
+          return;
+        }
+        pos = E.clip(pos + dir, 0, 4);
         Pip.playSound('SCROLL');
         draw();
       } else if (mode === C.MODES.RUNNING) {
@@ -276,25 +319,49 @@
     }
   }
 
-  // knob2 rotate — moves between h/m/s (or adjusts the locked field), or
-  // cycles the alert type, depending on which row is active
+  // knob2 rotate — in SET mode: adjusts the locked field's value while
+  // editing (mirrors knob1); otherwise cycles between the three time
+  // fields (wrapping) while one has focus, cycles the alert type while
+  // ALERT has focus, or jumps focus to/from MENU while START has focus.
   function onKnob2(dir) {
-    if (mode !== C.MODES.SET || row === 2 || row === 3) return;
-    if (row === 0) {
-      if (editing) {
-        const max = fieldIndex === 0 ? 99 : 59;
-        time[fieldIndex] = E.clip(time[fieldIndex] + dir, 0, max);
-      } else {
-        fieldIndex = (fieldIndex + dir + 3) % 3;
+    if (mode !== C.MODES.SET) return;
+
+    if (focus === 'menu') {
+      if (dir > 0) {
+        focus = 'stack';
+        Pip.playSound('SCROLL');
+        draw();
       }
-    } else if (row === 1) {
-      alertIndex = (alertIndex + dir + C.ALERT_TYPES.length) % C.ALERT_TYPES.length;
+      return;
     }
-    Pip.playSound('SCROLL');
-    draw();
+
+    if (editing) {
+      const max = pos === 0 ? 99 : 59;
+      time[pos] = E.clip(time[pos] + dir, 0, max);
+      Pip.playSound('SCROLL');
+      draw();
+      return;
+    }
+
+    if (pos <= 2) {
+      pos = (pos + dir + 3) % 3;
+      Pip.playSound('SCROLL');
+      draw();
+    } else if (pos === 3) {
+      if (dir < 0) {
+        focus = 'menu';
+        Pip.playSound('SCROLL');
+        draw();
+      }
+    } else if (pos === 4) {
+      alertIndex = (alertIndex + dir + C.ALERT_TYPES.length) % C.ALERT_TYPES.length;
+      Pip.playSound('SCROLL');
+      draw();
+    }
   }
 
   Pip.audioStop();
+  layoutAlertButton();
   Pip.onExclusive('knob1', onKnob1);
   Pip.onExclusive('knob2', onKnob2);
   redrawInterval = setInterval(draw, 1000);
