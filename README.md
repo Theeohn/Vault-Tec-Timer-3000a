@@ -13,16 +13,7 @@ A countdown timer with customizable alerts, and a stopwatch with lap function.
 ## Alert Types
 
 - **SOUND ONLY** — Choose a sound from the ALARM folder, default is Klaxon
-- **LIGHTS ONLY** — Flashes LED on and off repeatedly
-- **LIGHTS AND SOUND** — Both simultaneously
-
-## Installation
-
-Place the following files on your Pip-Boy 3000 SD card:
-
-```
-
-```
+- **LED TORCH** — Flashes LED on and off repeatedly
 
 
 ## License
