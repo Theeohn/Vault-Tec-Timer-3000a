@@ -15,10 +15,10 @@
     RESET_CX: 390,
     SIDE_Y1: 220,
     SIDE_Y2: 244,
-    START_Y1: 205,
-    START_Y2: 229,
-    LAP_Y1: 235,
-    LAP_Y2: 259,
+    START_Y1: 198,
+    START_Y2: 232,
+    LAP_Y1: 240,
+    LAP_Y2: 264,
     LAPCOUNT_Y: 282,
     LAPVIEW_Y: 302,
   };
@@ -51,14 +51,15 @@
     return true;
   }
 
-  function drawButton(cx, y1, y2, w, label, focused, enabled) {
+  function drawButton(cx, y1, y2, w, label, font, focused, enabled) {
     h.setColor(2).drawRect(cx - w, y1, cx + w, y2);
     if (enabled && focused) {
       h.setColor(3);
       for (let o = 1; o <= 3; o++) h.drawRect(cx - w - o, y1 - o, cx + w + o, y2 + o);
     }
-    h.setColor(enabled ? 3 : 2).setFontMonofonto18().setFontAlign(0, 0)
-      .drawString(label, cx, (y1 + y2) / 2);
+    h.setColor(enabled ? 3 : 2);
+    if (font === 28) h.setFontMonofonto28(); else h.setFontMonofonto18();
+    h.setFontAlign(0, 0).drawString(label, cx, (y1 + y2) / 2);
   }
 
   const NUM_FONT_SIZE = 36, LETTER_FONT_SIZE = 28;
@@ -86,12 +87,12 @@
     }
 
     // Main vertical stack: START/STOP, LAP
-    drawButton(240, C.START_Y1, C.START_Y2, 70, running ? 'STOP' : 'START', focus === 'stack' && row === 0, true);
-    drawButton(240, C.LAP_Y1, C.LAP_Y2, 70, 'LAP', focus === 'stack' && row === 1, running);
+    drawButton(240, C.START_Y1, C.START_Y2, 90, running ? 'STOP' : 'START', 28, focus === 'stack' && row === 0, true);
+    drawButton(240, C.LAP_Y1, C.LAP_Y2, 70, 'LAP', 18, focus === 'stack' && row === 1, running);
 
     // MENU and RESET sit off to the sides, mirrored, reached via knob2.
-    drawButton(C.MENU_CX, C.SIDE_Y1, C.SIDE_Y2, C.SIDE_W, 'MENU', focus === 'menu', true);
-    drawButton(C.RESET_CX, C.SIDE_Y1, C.SIDE_Y2, C.SIDE_W, 'RESET', focus === 'reset', elapsed > 0);
+    drawButton(C.MENU_CX, C.SIDE_Y1, C.SIDE_Y2, C.SIDE_W, 'MENU', 18, focus === 'menu', true);
+    drawButton(C.RESET_CX, C.SIDE_Y1, C.SIDE_Y2, C.SIDE_W, 'RESET', 18, focus === 'reset', elapsed > 0);
 
     if (laps.length) {
       h.setColor(2).setFontMonofonto14().setFontAlign(0, 0)

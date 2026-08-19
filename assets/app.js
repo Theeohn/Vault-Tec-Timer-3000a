@@ -1,6 +1,6 @@
 // =============================================================================
 //  Name: Vault-Tec Timer
-//  Authors: @Theeohn, @trekker87
+//  Authors: @trekker87, @Theeohn
 //  License: MIT
 //  Repository: https://github.com/Theeohn/Vault-Tec-Timer-3000a
 // =============================================================================

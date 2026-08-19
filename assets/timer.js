@@ -1,6 +1,6 @@
 // =============================================================================
 //  Name: Vault-Tec Timer, Timer
-//  Authors: @Theeohn, @trekker87
+//  Authors: @trekker87, @Theeohn
 //  License: MIT
 //  Repository: https://github.com/Theeohn/Vault-Tec-Timer-3000a
 // =============================================================================
@@ -8,19 +8,13 @@
 (function (goTo) {
   const C = {
     MODES: { SET: 0, RUNNING: 1, PAUSED: 2, DONE: 3 },
-    ALERT_TYPES: [
-      '<  ALERT TYPE: SOUND ONLY  >',
-      '<  ALERT TYPE: LED FLASH  >',
-      '<  ALERT TYPE: SOUND AND LED  >',
-    ],
+    ALERT_TYPES: ['SOUND', 'LED'],
+    SOUND_DIR: 'SOUND/ALARM',
+    DEFAULT_SOUND: 'Klaxon.wav',
     FIELD_X: [152, 240, 328], // same coordinates as stopwatch.js's time fields
-    FIELD_Y: 160,
+    FIELD_Y: 146, // centered between the TIMER title and the MENU/START row
     FIELD_LABELS: ['h', 'm', 's'], // lowercase, matching stopwatch.js
     FIELD_BOX_HALF: 20, // field highlight box half-height
-
-    // ALERT bar: bottom-anchored, 20px above the display's bottom edge (320)
-    ALERT_Y1: 276,
-    ALERT_Y2: 300,
 
     // MENU/START share one row directly above the ALERT bar, side by side -
     // MENU keeps its normal size, START is enlarged (bigger text, taller box)
@@ -29,13 +23,23 @@
     MENU_W: 50,
     START_W: 90,
     PAIR_GAP: 12, // gap between the MENU and START boxes
+
+    ALERT_Y1: 265,
+    ALERT_Y2: 289,
   };
 
+  let fs = require('fs');
   let mode = C.MODES.SET;
   let time = [0, 0, 0]; // hours, minutes, seconds
-  let alertIndex = 0;
+  let alertType = 0; // 0 = SOUND, 1 = LED
+  let soundFiles = [];
+  let soundIdx = 0;
+  let browsingSound = false; // true while knob1 or knob2 is scrolling soundFiles instead of navigating
+  // Unified position for knob1 in SET mode: 0=hour, 1=minute, 2=second,
+  // 3=MENU, 4=START, 5=ALERT.
   let pos = 4; // starts on START
   let lastPair = 4; // remembers whether MENU(3) or START(4) was last active
+  let lastTop = 1; // remembers whether Hours(0), Minutes(1), or Seconds(2) was last active
   let editing = false;
   let secondsRemaining = 0;
   let ticker, alarmTicker, flashFrame = 0, redrawInterval;
@@ -47,20 +51,71 @@
     return n < 10 ? '0' + n : '' + n;
   }
 
-  function layoutButtons() {
-    let maxW = 0;
-    for (let i = 0; i < C.ALERT_TYPES.length; i++) {
-      const w = h.setFontMonofonto18().stringWidth(C.ALERT_TYPES[i]);
-      if (w > maxW) maxW = w;
+  function readSoundDir() {
+    const dirs = [C.SOUND_DIR, 'SOUND/ALARM'];
+    for (let d = 0; d < dirs.length; d++) {
+      try {
+        const files = fs
+          .readdir('/' + dirs[d])
+          .filter(function (n) {
+            return n !== '.' && n !== '..' && n.length > 4 && n.slice(-4).toLowerCase() === '.wav';
+          })
+          .sort();
+        if (files.length > 0) {
+          C.SOUND_DIR = dirs[d];
+          return files;
+        }
+      } catch (e) {}
     }
-    alertW = maxW / 2 + 16;
+    try {
+      E.defrag();
+      return fs
+        .readdir('/' + C.SOUND_DIR)
+        .filter(function (n) {
+          return n !== '.' && n !== '..' && n.length > 4 && n.slice(-4).toLowerCase() === '.wav';
+        })
+        .sort();
+    } catch (e2) {
+      return [];
+    }
+  }
 
-    const totalHalf = alertW;
-    menuCx = 240 - totalHalf + C.MENU_W;
-    startCx = 240 + totalHalf - C.START_W;
-    // Keep at least PAIR_GAP between the two boxes' facing edges.
-    const minStartLeft = menuCx + C.MENU_W + C.PAIR_GAP + C.START_W;
-    if (startCx < minStartLeft) startCx = minStartLeft;
+  function loadSoundFiles() {
+    soundFiles = readSoundDir();
+    if (!soundFiles.length) {
+      soundFiles = [C.DEFAULT_SOUND];
+    }
+    soundIdx = -1;
+    for (let i = 0; i < soundFiles.length; i++) {
+      if (soundFiles[i].toLowerCase().indexOf('klaxon') !== -1) {
+        soundIdx = i;
+        break;
+      }
+    }
+    if (soundIdx === -1) {
+      soundIdx = soundFiles.indexOf(C.DEFAULT_SOUND);
+    }
+    if (soundIdx === -1) soundIdx = 0;
+  }
+
+  function alertLabel() {
+    if (alertType === 1) return '<  ALERT TYPE: LED FLASH  >';
+    const name = soundFiles[soundIdx] || C.DEFAULT_SOUND;
+    const dot = name.lastIndexOf('.');
+    const stripped = dot !== -1 ? name.slice(0, dot) : name;
+    return '<  ALERT TYPE: ' + stripped.toUpperCase() + '  >';
+  }
+
+  function layoutAlertWidth() {
+    const label = alertLabel();
+    alertW = h.setFontMonofonto18().stringWidth(label) / 2 + 16;
+  }
+
+  function layoutButtonPair() {
+    const totalSpan = C.MENU_W * 2 + C.PAIR_GAP + C.START_W * 2;
+    const leftEdge = 240 - totalSpan / 2;
+    menuCx = leftEdge + C.MENU_W;
+    startCx = leftEdge + C.MENU_W * 2 + C.PAIR_GAP + C.START_W;
   }
 
   function drawButton(cx, y1, y2, w, label, font, focused, enabled) {
@@ -87,6 +142,7 @@
   }
 
   function drawSet() {
+    layoutAlertWidth();
     h.setColor(3).setFontMonofonto36().setFontAlign(0, 0).drawString('TIMER', 240, 47);
 
     for (let i = 0; i < 3; i++) {
@@ -106,8 +162,34 @@
 
     drawButton(menuCx, C.ROW_Y1, C.ROW_Y2, C.MENU_W, 'MENU', 18, pos === 3, true);
     drawButton(startCx, C.ROW_Y1, C.ROW_Y2, C.START_W, 'START', 28, pos === 4, true);
-    drawButton(240, C.ALERT_Y1, C.ALERT_Y2, alertW, C.ALERT_TYPES[alertIndex], 18, pos === 5, true);
-  }
+
+    if (browsingSound) {
+      h.setColor(2).fillRect(240 - alertW, C.ALERT_Y1, 240 + alertW, C.ALERT_Y2);
+      if (pos === 5) {
+        h.setColor(3);
+        for (let o = 1; o <= 3; o++) {
+          h.drawRect(240 - alertW - o, C.ALERT_Y1 - o, 240 + alertW + o, C.ALERT_Y2 + o);
+        }
+      }
+      h.setColor(0).setFontMonofonto18().setFontAlign(0, 0)
+        .drawString(alertLabel(), 240, (C.ALERT_Y1 + C.ALERT_Y2) / 2);
+    } else {
+      drawButton(240, C.ALERT_Y1, C.ALERT_Y2, alertW, alertLabel(), 18, pos === 5, true);
+    }
+
+    if (pos === 5) {
+      if (alertType === 0) {
+        h.setColor(2).setFontMonofonto14().setFontAlign(0, 0)
+          .drawString(
+            browsingSound ? 'Press left wheel to confirm changes' : 'Press left wheel to change sound, turn right wheel to use LED',
+            240, C.ALERT_Y2 + 18
+          );
+      } else {
+        h.setColor(2).setFontMonofonto14().setFontAlign(0, 0)
+          .drawString('Turn right wheel to use alarms', 240, C.ALERT_Y2 + 18);
+      }
+    }
+  } 
 
   function drawRunning() {
     const hrs = Math.floor(secondsRemaining / 3600);
@@ -116,7 +198,7 @@
     h.setColor(3).setFontMonofonto23().setFontAlign(0, 0).drawString('TIMER RUNNING', 240, 55);
     h.setFontMonofonto36().setFontAlign(0, 0)
       .drawString(pad(hrs) + ':' + pad(mins) + ':' + pad(secs), 240, 150);
-    h.setColor(2).setFontMonofonto16().setFontAlign(0, 0).drawString(C.ALERT_TYPES[alertIndex], 240, 200);
+    h.setColor(2).setFontMonofonto16().setFontAlign(0, 0).drawString(alertLabel(), 240, 200);
 
     h.setColor(2).drawRect(120, 230, 240, 254);
     if (runRow === 0) {
@@ -155,8 +237,8 @@
   }
 
   function drawDone() {
-    h.setColor(3).setFontMonofonto23().setFontAlign(0, 0).drawString("** TIME'S UP! **", 240, 130);
-    h.setColor(2).setFontMonofonto16().setFontAlign(0, 0).drawString('PRESS KNOB 1 TO RESET', 240, 210);
+    h.setColor(3).setFontMonofonto36().setFontAlign(0, 0).drawString("** TIME'S UP! **", 240, 124);
+    h.setColor(2).setFontMonofonto28().setFontAlign(0, 0).drawString('PRESS LEFT WHEEL TO STOP', 240, 214);
   }
 
   function draw() {  "ram";
@@ -175,33 +257,38 @@
 
   function stopAlarm() {
     if (alarmTicker) clearInterval(alarmTicker);
-    if (alertIndex === 1 || alertIndex === 2) {
+    if (alertType === 1) {
       try { Pip.setTorch(false); } catch (e) { Pip.log('setTorch failed: ' + e); }
+    } else {
+      Pip.audioStop();
     }
   }
 
+  // LED: runs on a 500ms tick so the torch completes one full on/off cycle
+  // every second. SOUND: plays the selected .wav file from SOUND_DIR on a
+  // loop until dismissed.
   function startAlarm() {
-    flashFrame = 0;
-    let soundToggle = false;
-    let ledOn = true;
-
-    alarmTicker = setInterval(function () {
-      flashFrame++;
-
-      if (alertIndex === 1 || alertIndex === 2) {
+    if (alertType === 1) {
+      flashFrame = 0;
+      let ledOn = true;
+      alarmTicker = setInterval(function () {
+        flashFrame++;
         try {
           Pip.setTorch(ledOn);
         } catch (e) {
           Pip.log('setTorch failed: ' + e);
         }
         ledOn = !ledOn;
-      }
+      }, 500);
+      return;
+    }
 
-      if (alertIndex === 0) {
-        Pip.playSound(soundToggle ? 'SCROLL' : 'TAB');
-        soundToggle = !soundToggle;
-      }
-    }, 500);
+    const name = soundFiles[soundIdx] || C.DEFAULT_SOUND;
+    try {
+      Pip.audioStart(C.SOUND_DIR + '/' + name, { repeat: true });
+    } catch (e) {
+      Pip.log('audioStart failed: ' + e);
+    }
   }
 
   function runTicker() {
@@ -231,6 +318,10 @@
     runTicker();
   }
 
+  // Leaves for the title menu. If a countdown is in progress it is paused
+  // (ticker stopped, secondsRemaining preserved) rather than cancelled, so
+  // selecting TIMER again from the menu can resume it. A brief notice is
+  // shown for one frame before navigating away.
   function goToMenuFromRunning() {
     stopTicker();
     mode = C.MODES.PAUSED;
@@ -242,6 +333,7 @@
     goTo('HOLO/VAULT_TEC_TIMER/TITLE.JS');
   }
 
+  // knob1 press — behavior depends on mode/pos
   function onPress() {
     if (mode === C.MODES.SET) {
       if (pos <= 2) {
@@ -253,6 +345,10 @@
         goTo('HOLO/VAULT_TEC_TIMER/TITLE.JS');
       } else if (pos === 4) {
         startTimer();
+      } else if (pos === 5 && alertType === 0) {
+        browsingSound = !browsingSound;
+        Pip.playSound('TAB');
+        draw();
       }
     } else if (mode === C.MODES.RUNNING) {
       if (runRow === 0) {
@@ -281,6 +377,10 @@
     }
   }
 
+  // Adjusts the currently-locked time field by -dir (so rotating "down",
+  // dir=+1, decreases the value and "up", dir=-1, increases it). If the
+  // adjustment would go out of the field's range, editing is exited
+  // instead and the caller should continue on to normal navigation.
   function adjustFieldOrExit(dir) {
     const max = pos === 0 ? 99 : 59;
     const next = time[pos] - dir;
@@ -292,32 +392,64 @@
     return true;
   }
 
+  // Moves pos vertically across rows:
+  // Row 0: time fields [0: Hours, 1: Minutes, 2: Seconds]
+  // Row 1: [3: MENU, 4: START]
+  // Row 2: [5: ALERT]
   function moveVertical(dir) {
     if (pos <= 2) {
+      lastTop = pos;
       if (dir > 0) {
-        pos = pos === 2 ? lastPair : pos + 1;
-      } else {
-        pos = E.clip(pos - 1, 0, 2);
+        if (pos === 0) {
+          pos = 3; // Hours -> MENU
+          lastPair = 3;
+        } else if (pos === 2) {
+          pos = 4; // Seconds -> START
+          lastPair = 4;
+        } else {
+          pos = lastPair; // Minutes -> last active of MENU or START
+        }
       }
     } else if (pos === 3 || pos === 4) {
       lastPair = pos;
-      pos = dir > 0 ? 5 : 2;
+      if (dir > 0) {
+        pos = 5; // MENU/START -> ALERT
+      } else {
+        if (lastTop === 1) {
+          pos = 1; // back to Minutes if last came from there
+        } else if (pos === 3) {
+          pos = 0; // MENU -> Hours
+        } else {
+          pos = 2; // START -> Seconds
+        }
+      }
     } else if (pos === 5) {
-      if (dir < 0) pos = lastPair;
+      if (dir < 0) {
+        pos = lastPair; // ALERT -> last active of MENU/START
+      }
     }
   }
 
+  // knob1 rotate — in SET mode: adjusts the locked field's value while
+  // editing (auto-exiting and continuing to navigate once out of range);
+  // otherwise moves vertically across rows.
   function onKnob1(dir) {
     if (dir) {
       if (mode === C.MODES.SET) {
         let changed = false;
-        if (editing) {
-          if (adjustFieldOrExit(dir)) {
-            changed = true;
-          } else {
-            const prev = pos;
-            moveVertical(dir);
-            changed = pos !== prev;
+        if (browsingSound) {
+          const prev = soundIdx;
+          soundIdx = (soundIdx + dir + soundFiles.length) % soundFiles.length;
+          changed = soundIdx !== prev;
+        } else if (editing) {
+          if (pos <= 2) {
+            if (adjustFieldOrExit(dir)) {
+              changed = true;
+            } else {
+              const prev = pos;
+              moveVertical(dir);
+              changed = pos !== prev;
+            }
           }
         } else {
           const prev = pos;
@@ -342,23 +474,29 @@
     }
   }
 
+  // Handles knob2's horizontal navigation once not editing: cycles the
+  // three time fields, toggles MENU/START, or cycles the alert type.
   function horizontalNav(dir) {
+    if (browsingSound) return false;
     if (pos <= 2) {
       const prev = pos;
       pos = (pos + dir + 3) % 3;
+      lastTop = pos;
       return pos !== prev;
     } else if (pos === 3 || pos === 4) {
       pos = pos === 3 ? 4 : 3;
       lastPair = pos;
       return true;
     } else if (pos === 5) {
-      const prev = alertIndex;
-      alertIndex = (alertIndex + dir + C.ALERT_TYPES.length) % C.ALERT_TYPES.length;
-      return alertIndex !== prev;
+      const prev = alertType;
+      alertType = (alertType + dir + C.ALERT_TYPES.length) % C.ALERT_TYPES.length;
+      return alertType !== prev;
     }
     return false;
   }
 
+  // knob2 rotate — in SET mode: adjusts values or sound selection while editing/browsing;
+  // otherwise cycles between time fields, MENU/START, or alert type.
   function onKnob2(dir) {
     if (mode === C.MODES.RUNNING) {
       const prev = runRow;
@@ -370,11 +508,17 @@
     if (mode !== C.MODES.SET) return;
 
     let changed = false;
-    if (editing) {
-      if (adjustFieldOrExit(dir)) {
-        changed = true;
-      } else {
-        changed = horizontalNav(dir);
+    if (browsingSound) {
+      const prev = soundIdx;
+      soundIdx = (soundIdx + dir + soundFiles.length) % soundFiles.length;
+      changed = soundIdx !== prev;
+    } else if (editing) {
+      if (pos <= 2) {
+        if (adjustFieldOrExit(dir)) {
+          changed = true;
+        } else {
+          changed = horizontalNav(dir);
+        }
       }
     } else {
       changed = horizontalNav(dir);
@@ -384,13 +528,16 @@
   }
 
   Pip.audioStop();
-  layoutButtons();
+  loadSoundFiles();
+  layoutButtonPair();
+  layoutAlertWidth();
   Pip.onExclusive('knob1', onKnob1);
   Pip.onExclusive('knob2', onKnob2);
   redrawInterval = setInterval(draw, 1000);
   draw();
 
   return {
+    id: "TIMER",
     remove: function () {
       clearInterval(redrawInterval);
       stopTicker();
